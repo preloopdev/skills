@@ -1,6 +1,6 @@
 ---
 name: preloop
-description: Run and debug Preloop local CI — GitHub Actions-compatible workflows executed in one isolated microVM per job (smolvm/libkrun). Use when the user asks to run or plan a workflow locally, submit CI, debug a failed job, retry a failed step in its live VM, open a shell in a preserved VM, manage the local runner pool or GitHub credentials, or work with the preloop CLI, preloopd, or the aksh control plane. Triggers: "preloop run", "run CI locally", "run this workflow", "CI failed", "debug the failure", "retry the step", "agent loop", "smolvm runner".
+description: 'Run and debug Preloop local CI — GitHub Actions-compatible workflows executed in one isolated microVM per job (smolvm/libkrun). Use when the user asks to run or plan a workflow locally, submit CI, debug a failed job, retry a failed step in its live VM, open a shell in a preserved VM, manage the local runner pool or GitHub credentials, or work with the preloop CLI, preloopd, or the aksh control plane. Triggers: "preloop run", "run CI locally", "run this workflow", "CI failed", "debug the failure", "retry the step", "agent loop", "smolvm runner".'
 ---
 
 # Preloop
