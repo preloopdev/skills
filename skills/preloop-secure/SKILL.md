@@ -140,9 +140,9 @@ makes every downstream injection reachable).
 
 - Default `permissions:` should be `permissions: {}` or `contents: read` at the
   top level; grant write only per-job where needed.
-- `token_permissions_ceiling` (opt-in TOML table) caps what any workflow can
-  request — set `default = "read"` and explicit grants per permission so a
-  workflow cannot escalate past policy.
+- `token_permissions_ceiling` (control-plane policy) caps what any workflow
+  can request — `GET /api/v1/policies/token-ceiling` to read the effective
+  ceiling. Not configured = no cap; the workflow's YAML is all that binds it.
 - `pull-requests: write` + `issues: write` + `contents: write` on a job that
   runs PR content = maintainer impersonation (approve/merge/comment).
 
