@@ -13,21 +13,21 @@ isolated microVM (smolvm/libkrun), with a pause-and-retry debug loop for agents.
 
 ```sh
 # All agents detected on this machine
-npx skills add preloopdev/preloop-skill
+npx skills add preloopdev/skills
 
 # A specific agent
-npx skills add preloopdev/preloop-skill -a claude-code
+npx skills add preloopdev/skills -a claude-code
 
 # Global scope (available across projects)
-npx skills add preloopdev/preloop-skill -g -y
+npx skills add preloopdev/skills -g -y
 ```
 
 ## Use without installing
 
 ```sh
-npx skills use preloopdev/preloop-skill@preloop
-npx skills use preloopdev/preloop-skill@preloop-secure
-npx skills use preloopdev/preloop-skill@preloop-optimize
+npx skills use preloopdev/skills@preloop
+npx skills use preloopdev/skills@preloop-secure
+npx skills use preloopdev/skills@preloop-optimize
 ```
 
 ## Layout
