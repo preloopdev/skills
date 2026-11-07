@@ -1,172 +1,170 @@
 ---
 name: preloop
-description: 'Run and debug Preloop local CI — GitHub Actions-compatible workflows executed in one isolated microVM per job (smolvm/libkrun). Use when the user asks to run or plan a workflow locally, submit CI, debug a failed job, retry a failed step in its live VM, open a shell in a preserved VM, manage the local runner pool or GitHub credentials, or work with the preloop CLI, preloopd, or the aksh control plane. Triggers: "preloop run", "run CI locally", "run this workflow", "CI failed", "debug the failure", "retry the step", "agent loop", "smolvm runner".'
+description: 'Run and debug GitHub Actions workflows on the hosted preloop platform — jobs execute in isolated microVMs with per-second billing. Use when the user asks to sign in, run or plan a workflow, submit CI, debug a failed job, retry a failed step in its live VM, open a shell in a preserved VM, delegate a scoped credential to an agent, manage secrets, or work with the preloop CLI. Triggers: "preloop ci", "run this workflow", "CI failed", "debug the failure", "retry the step", "agent loop", "preloop login".'
 ---
 
 # Preloop
 
-Preloop is a macOS-first local/self-hosted/managed CI platform. It reimplements the
-GitHub Actions control plane (`aksh`) and a faithful Rust runner, and executes each
-job in an isolated Linux microVM via **smolvm** (libkrun) on Apple Silicon, with
-Firecracker as the scale-tier executor. Workflows are drop-in GitHub Actions YAML;
-the unmodified official runner also works against aksh.
+Preloop is GitHub Actions-compatible CI where every job runs in an isolated
+microVM, billed per second. The control plane is **hosted** — the agent talks
+to `PRELOOP_URL` over a bearer token and never administers an engine. The same
+CLI can also self-host (`preloop serve`), but the default path is the hosted
+platform.
 
-Source of truth for this skill: the CLI at `crates/preloop-cli/src/main.rs` (current
-subcommands only — docs under `preloop/docs/` are partly aspirational; verify a
-command exists before using it).
+Source of truth for this skill: the CLI at `crates/preloop-cli/src/main.rs`
+(current subcommands only — verify a command exists before using it) and
+`docs/control-plane/`.
 
-## Non-negotiables (trust model)
+## Non-negotiables
 
-- **One isolated microVM per job.** No host Docker socket as a core dependency.
-- **No real secrets in untrusted jobs by default.** Secrets are reference-based:
-  `preloop secret list` returns names only, never values.
-- **No silent fidelity gaps.** Unsupported workflow behavior must be explicit and
-  machine-readable, never silently approximated.
-- **Dirty retry is not a clean verdict.** After fixing a failure in a live VM, the
-  final "fixed" call requires a clean run from a fresh VM/overlay with strict policy.
+- **Hosted session, not a local engine.** `preloop login` (RFC 8628 device
+  flow) + `preloop org use <ORG>`. Do not ask the agent to handle the GitHub
+  credential or a user session; there is no engine administrator credential
+  on hosted preloop.
+- **Delegated tokens are short and narrow.** `preloop agent exec` yields a
+  session whose permissions are the intersection of the user's grants, the
+  agent's ceiling, and requested scopes; max TTL 15 minutes. Never mint or
+  pass a broader credential than needed.
+- **`ci-agent` cannot approve itself.** It can create/read runs, cancel its
+  own runs, control its own debug sessions, and read artifacts — it cannot
+  use secrets, use OIDC, publish runs, approve environments or forks, or
+  administer agents. A refusal for out-of-scope action is expected; do not
+  retry it with a broader credential.
+- **Push-back is human-owned.** Agents do not use `preloop ci push` or the
+  auto-PR path. A run is evidence for the person; the person publishes.
+- **Dirty retry is not a clean verdict.** A fix proven inside a paused VM
+  must be confirmed by a clean run from a fresh VM before calling the job
+  fixed.
+- **Secrets are reference-based.** `preloop ci secrets list` returns names,
+  tiers and bindings — never values.
 
-## Agent core loop
+## Sign in
+
+```sh
+preloop login --platform-url https://<hosted-control-plane>
+preloop whoami
+preloop org use org_01H...
+preloop doctor        # verify credential/config
+```
+
+Scripts and agents use `PRELOOP_URL` + `PRELOOP_TOKEN` instead of a session.
+
+## Agent credentials (human sets up)
+
+```sh
+preloop agent create ci-bot --roles ci-agent
+preloop agent credentials ci-bot
+preloop agent login --agent ci-bot --oidc-token "$OIDC_ID_TOKEN"   # or --cid/--assertion (Ed25519, single-use)
+preloop agent exec --agent ci-bot --scopes runs:read,artifacts:read --ttl 15m -- <command>
+preloop agent grant-job RUN_ID/JOB --agent ci-bot                  # task grant on one live job
+```
+
+## Core loop
 
 ```text
-preloop run -f <workflow>        # run; on failure a TTY run pauses the VM
-preloop debug --json             # read the paused session as JSON (agents/scripts)
+preloop ci plan -f <workflow> --json   # expanded job DAG + matrix, no execution
+preloop ci run -f <workflow>           # snapshot working tree, run; TTY runs pause on failure
+preloop ci status --json               # active/recent runs
+preloop ci logs RUN_ID --job <job> [--step N] [-f]
+preloop ci debug --json RUN_ID         # paused session as JSON (agents/scripts)
 <edit source on the host>
-preloop debug --verdict retry --sync --from <step>
-                                 # sync host edits into the VM, re-run from that step
-preloop debug --verdict continue # keep going from the paused step
-preloop debug --verdict abort    # tear down, mark failed
+preloop ci debug RUN_ID --verdict retry --sync --from <step>
+preloop ci debug RUN_ID --verdict continue|abort
+preloop ci rerun RUN_ID --failed       # replays captured tree — for flakes, not source fixes
 ```
 
-Interactive `preloop run` **pauses** at a failed step and holds the microVM open so
-you can fix and retry from that step. Non-interactive runs (`--detach`, piped
-stdout, CI) never pause; pass `--preserve-on-failure` to keep the failed VM alive
-for a later `preloop shell`.
+Interactive `preloop ci run` **pauses** at a failed step and holds the VM.
+Non-interactive runs (`--detach`, piped stdout, agents) never pause; pass
+`--debug` to opt into a debug session, or `--preserve-on-failure` to keep the
+VM for `preloop ci shell`.
 
-## Command reference (current CLI)
+### Running checks before a push
 
-### Run workflows
+- Commit first where possible — `run` snapshots the working tree, but a
+  commit makes the tested tree explicit.
+- Select only check jobs (test/lint/build). Skip jobs that deploy, publish,
+  read secrets beyond `GITHUB_TOKEN`, or have `write`/`write-all` token
+  permissions. `--job` pulls in its `needs:` closure — inspect every job in
+  it.
+- `pull_request` events need `--base <ref>` for `branches:`/`paths:` filters
+  and `--payload <file>` when conditions read PR fields — otherwise skipped
+  steps can fake green.
+- `preloop ci rerun --failed` replays the *captured* tree — good for flakes,
+  useless for testing a source fix. A fix needs a fresh `run`.
+
+## Command reference (`preloop ci`)
 
 ```text
-preloop run [-f <path>] [--job <id>] [--event <trigger>] [--payload <file.json>]
-            [--base <ref>] [--secret NAME=VALUE] [-d|--detach] [--no-debug]
-            [--preserve-on-failure]
+preloop ci run [-f WF] [--job ID] [--event T] [--payload F] [--base REF]
+               [--secret NAME=V] [-d|--detach] [--debug] [--preserve-on-failure]
+preloop ci plan [-f WF] [--json]
+preloop ci status [RUN_ID] [--json]
+preloop ci logs [RUN_ID] [--job J] [--step N] [-f]
+preloop ci cancel [RUN_ID]
+preloop ci rerun [RUN_ID] [--failed | --job J]
+preloop ci push RUN_ID                 # human path: push + PR + check runs
+preloop ci manifest RUN_ID [--job J] [--verify] [--dsse --export F]
+preloop ci debug [RUN_ID] [--json] [--verdict retry|continue|abort] [--sync]
+               [--from STEP | --from-start] [--revert none|untracked|all]
+               [--export] [--takeover]
+preloop ci shell [last-failed]         # PTY into a preserved VM
+preloop ci dap RUN_ID                  # DAP debug adapter session
 ```
 
-- `-f` — workflow file. A bare filename like `ci.yml` resolves inside
-  `.github/workflows/`; a path is used as-is. When omitted, discovers workflows
-  whose triggers match the current repo state/event.
-- `--job` — single job by its YAML key; includes the `needs:` dependency closure.
-- `--event` — simulate a trigger (`push`, `pull_request`, `merge_group`, …);
-  `--payload` supplies a webhook body JSON; `--base` sets the base ref for
-  `pull_request`/`merge_group`.
-- `--detach` — submit and return without streaming events.
-- `--no-debug` — tear down on failure instead of pausing (default when detached).
-
-### Inspect and control
+Secrets:
 
 ```text
-preloop plan        # expanded job DAG + matrix, no execution
-preloop status      # active and recent runs
-preloop logs        # run logs
-preloop cancel      # cancel current run
+preloop ci secrets list [--repo o/r | --org O]      # names/tier/bindings, never values
+preloop ci secrets set NAME [--stdin|--from-file F|--from-env V]
+                      [--repo o/r [--env E] | --org O]
+                      [--branch G] [--workflow P] [--job K] ...   # bindings
+preloop ci secrets scope NAME ...                   # replace bindings only
+preloop ci secrets delete NAME
 ```
 
-### Debug a failed job
+## Consume the event stream
 
-```text
-preloop shell [session-id|run-id|job-name]        # PTY into the preserved VM
-preloop debug [session] --json                    # session as JSON, exit (agents)
-preloop debug [session] --verdict retry [--sync] [--force]
-              [--from <step>|--from-start] [--revert none|untracked|all]
-preloop debug [session] --verdict continue|abort
-preloop debug [session] --export [--patch-only]   # pull VM-side edits back to host
-```
+`GET /api/v1/runs/RUN_ID/events.ndjson` with the session bearer returns a
+snapshot then live NDJSON: `run_accepted`, `run_status`, `job_status`, `log`,
+`annotation`, `job_completed`, `check_run_created`. Reconnect + de-duplicate
+— a new connection starts from a fresh snapshot. Point-in-time:
+`preloop ci status RUN_ID --json` or `GET /api/v1/runs/RUN_ID`.
 
-- `--sync` — copy host source changes into the VM before retrying. A file changed
-  on both sides aborts unless `--force`.
-- `--from <step>` — re-run from a 1-based step number or display name (must be at
-  or before the failed step); `--from-start` re-runs from the first user step.
-- `--revert` — undo the failed attempt's workspace debris: `none` (default),
-  `untracked`, or `all`.
-- `--export` — bring edits made inside the VM back to the host workspace.
+## Debug sessions over HTTP
 
-### Secrets and GitHub credentials
+`GET/POST /api/v1/debug/sessions[/{id}[/lease|/events|/operations|/audit]]`.
+One mutating lease at a time; operations carry `request_id` +
+`expected_version` (idempotent, stale versions rejected). `retry_from` takes
+a zero-based `step_index`. Pause credit is capped at 20 minutes per job —
+release the lease when done so unattached time doesn't bill as pause.
+`preloop ci debug --takeover` replaces a stranded lease.
 
-```text
-preloop secret set <NAME> [--value V | stdin] [--repo owner/repo]
-preloop secret list [--repo owner/repo]           # names only, never values
-preloop secret rm <NAME> [--repo owner/repo]
-preloop setup github                              # GitHub App or fine-grained PAT
-preloop doctor                                    # verify credential config
-```
+## Failure classification
 
-### Serve and update
-
-```text
-preloop serve [--listen ADDR] [--public-url URL] [--github-app-id ID]
-              [--github-app-key PATH] [--github-app-installation-id ID]
-              [--webhook-secret SECRET] [--save]
-preloop update   # poll GitHub Releases, atomically install matching binary
-```
-
-`serve` is the self-hosting entry point: control plane + microVM runner pool in the
-foreground, serving the GitHub webhook and Checks endpoints. `--public-url` must be
-the URL GitHub and remote runners can actually reach. Hidden alias: `engine`.
+| Classification | Action |
+|---|---|
+| `test_failure` / `compile_failure` | edit source, retry step |
+| `missing_secret` | bind/store it via `ci secrets`; don't work around |
+| `network_blocked` | inspect egress policy |
+| `cache_miss` | continue, or warm the cache |
+| `resource_oom` / `disk_quota` | raise resources or fix the test |
+| `timeout` | optimize or raise the timeout |
+| `infra_failure` | retry job or report a bug |
+| `fidelity_unsupported` | record the gap, don't fake it |
 
 ## Environment
 
 | Variable | Meaning |
 |---|---|
-| `AKSH_URL` | server base URL; default `http://127.0.0.1:9090` |
-| `AKSH_TOKEN` | API token for the server |
+| `PRELOOP_URL` | control-plane base URL (hosted default; `http://127.0.0.1:9090` for a local engine) |
+| `PRELOOP_TOKEN` | bearer for API calls (session token or delegated agent token) |
 | `PRELOOP_HOME` | state dir; default `~/.preloop` |
-| `PRELOOP_LISTEN` / `PRELOOP_PUBLIC_URL` | override `serve --listen` / `--public-url` |
-| `PRELOOP_RUNNER_LABELS` | comma-separated extra `runs-on` labels (e.g. declare `X64` on an ARM host) |
-| `PRELOOP_RUNNER_POOL_SIZE` | override warm runner pool size (memory-bounded, cap 8) |
-| `PRELOOP_RUNNER_STORAGE_GB` | persistent guest storage per runner; use `80` or more for full hosted-image OCI snapshots |
-| `PRELOOP_RUNNER_PACK_PROXY` / `PRELOOP_RUNNER_PACK_NO_PROXY` | proxy and bypass list for smolvm's registry export VM during golden packing |
-| `PRELOOP_RUNNER_BASE_IMAGE` / `PRELOOP_RUNNER_BUNDLE` / `PRELOOP_RUNNER_DNS` / `PRELOOP_RUNNER_OVERLAY_GB` / `PRELOOP_RUNNER_NAME_PREFIX` / `PRELOOP_RUNNER_POOL_ENABLED` / `PRELOOP_USE_FORK` / `PRELOOP_USE_PACKED_GOLDEN` / `PRELOOP_WORKSPACE` | runner pool / VM tuning knobs (full semantics in `crates/preloop-cli/src/main.rs`) |
 
-Runner execution defaults: packed goldens enabled, warm pool disabled, one
-single-use VM provisioned per queued job, and concurrency capped by host CPU.
-Each VM receives 4 vCPUs and a 4096 MiB ballooned memory ceiling. Set
-`PRELOOP_RUNNER_POOL_ENABLED=true` to keep warm runners (size is memory-bounded,
-cap 8), or `PRELOOP_USE_PACKED_GOLDEN=false` to force cold OCI provisioning.
-
-## Failure classification (from `preloop/docs/09_agent_loop_retry_and_fork.md`)
-
-Classify failures before retrying — do not burn loops on the wrong fix:
-
-| Classification | Suggested action |
-|---|---|
-| `test_failure` / `compile_failure` | edit source, retry step |
-| `missing_secret` | request/update policy, don't hack around it |
-| `network_blocked` | inspect the egress allowlist/policy |
-| `cache_miss` | continue, or warm the cache |
-| `resource_oom` / `disk_quota` | raise resources or fix the test |
-| `timeout` | optimize or raise the timeout |
-| `infra_failure` | retry job or report a bug |
-| `fidelity_unsupported` | unsupported workflow feature — record the gap, don't fake it |
-
-## Developing Preloop itself (this repo)
-
-```sh
-just build-preloop           # macOS CLI + ARM64 Linux runner (zigbuild)
-just preloop-run WF=fixtures/workflows/failing.yml   # run, pause on failure
-just preloop-run-detached WF=...                     # submit, keep VM preserved
-just preloop-shell           # shell into the most recent preserved VM
-just serve / serve-dev       # aksh control plane on 127.0.0.1:9090
-just test-ci                 # fmt-check + clippy + tests (the full gate)
-just dogfood                 # E2E with the real official runner
-just conform / conform-server-deep   # protocol conformance gates
-```
-
-Key paths: `crates/preloop-cli/src/main.rs` (CLI), `crates/preloop-orchestrator/`,
-`crates/preloop-vm/` (smolvm provider), `preloop/docs/00_index.md` (design docs),
-`fixtures/workflows/` (sample workflows), `goals/` (agent CI benchmarks).
+Local/self-host knobs (`PRELOOP_RUNNER_*`, `serve`) apply only when running
+your own engine — not part of the hosted agent path.
 
 ## Verification rule
 
-Never report "fixed" on a dirty retry alone. The final verdict must come from a
-clean run: fresh VM, clean overlay, strict network/secrets/cache policy. The repo
-gate is `just test-ci` plus `just conform` for protocol fidelity.
+Never report "fixed" on a dirty retry alone. The verdict needs a clean run:
+fresh VM, strict network/secrets/cache policy. And a paused-session success
+is evidence for the user — pushing and PRs stay human-gated.
