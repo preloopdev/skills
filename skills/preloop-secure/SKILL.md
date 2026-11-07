@@ -159,35 +159,24 @@ makes every downstream injection reachable).
   residue. Recommend managed runners for anything handling secrets; keep
   self-hosted pools for low-trust, secret-free work.
 
-## Engine policy (operator side)
+## Engine-side policy (check, don't assume)
 
-On the hosted platform these are API-managed policies under
-`/api/v1/policies/...` (`execution-protection`, `token-ceiling`,
-`namespace`, per-repo and per-environment rules); the system bearer or an
-org-admin session sets them. Self-hosted engines accept the same policy in
-`preloop.toml`:
+`execution_protection` and `token_permissions_ceiling` live on the control
+plane, not in your repo. Read them with the API:
 
-```toml
-[execution_protection]
-mode = "enforce"            # evaluate only logs — a finding is not a fix
-
-[[execution_protection.event_rules]]
-event = "pull_request_target"
-workflows = ["deploy.yml"]  # omit to match every workflow
-action = "deny"
-
-[[execution_protection.actor_rules]]
-actor = "untrusted-bot"
-action = "deny"
-
-[token_permissions_ceiling]
-default = "read"
-contents = "read"
-pull-requests = "write"
+```text
+GET /api/v1/policies/execution-protection   # mode + deny rules
+GET /api/v1/policies/token-ceiling          # effective permission ceiling
+GET /api/v1/policies/namespace              # cache/namespace isolation rules
 ```
 
-Also: `fork_policy` for approval-gated fork runs (24 h fail-closed on
-`POST /api/v1/runs/{id}/approve-fork`), and environment rules for deploy jobs.
+Both are opt-in and off by default — `evaluate` only logs. If a finding's fix
+is one of these policies, the user's org-admin session flips it, or it stays
+a reported gap. It is never "covered because the feature exists."
+
+Also: fork PRs fail closed after 24 h without
+`POST /api/v1/runs/{id}/approve-fork` — an approval gate the org controls,
+not workflow YAML.
 
 ## Output format
 
