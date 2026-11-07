@@ -161,7 +161,11 @@ makes every downstream injection reachable).
 
 ## Engine policy (operator side)
 
-In `preloop.toml`:
+On the hosted platform these are API-managed policies under
+`/api/v1/policies/...` (`execution-protection`, `token-ceiling`,
+`namespace`, per-repo and per-environment rules); the system bearer or an
+org-admin session sets them. Self-hosted engines accept the same policy in
+`preloop.toml`:
 
 ```toml
 [execution_protection]
@@ -198,7 +202,7 @@ ceiling, bindings, approval), and what remains open with the reason.
 ## Verify
 
 - A fix is verified when a real run exercises it: submit the workflow
-  (`preloop ci run` / `preloop run -f`) and confirm the hardened path behaves —
+  (`preloop ci run`) and confirm the hardened path behaves —
   a denied event is skipped and logged, a bound secret does not reach an
   unbound job, a drifted action loses its OIDC token.
 - `preloop ci secrets list` to confirm bindings landed; the audit log records
