@@ -92,6 +92,35 @@ VM for `preloop ci shell`.
 - `preloop ci rerun --failed` replays the *captured* tree — good for flakes,
   useless for testing a source fix. A fix needs a fresh `run`.
 
+## Move a repository from GitHub Actions
+
+Run `preloop ci migrate guide` and follow it exactly. Stop at every human gate
+it names; never push, disable a workflow, or touch a secret without approval.
+
+### Right-size each job first
+
+Pick a runner size per job from its GitHub Actions history, not by guessing.
+
+1. Collect the last 30 successful runs of each workflow:
+   `gh run list --workflow <file> --status success --limit 30 --json databaseId`,
+   then `gh api repos/<owner>/<repo>/actions/runs/<id>/jobs` for each job's
+   `started_at`, `completed_at` and `labels`.
+2. For each job, compute the median and p90 duration and note any run that
+   ended with exit code 137, `Killed` or an out-of-memory message.
+3. Size it:
+   - **Smallest (2 vCPU):** median under 2 minutes, or lint, format, typecheck
+     and other single-threaded work.
+   - **Middle (4 vCPU):** the default for builds and tests that use some
+     parallelism.
+   - **Largest (8 vCPU):** median over 10 minutes *and* the tool actually uses
+     the cores (`cargo`, `make -j`, Gradle, `pytest -n`, Jest/Vitest workers,
+     `nproc` in the script), or any memory failure in the history.
+   A job that does not parallelise gets no faster on more cores, only dearer.
+4. Show the human one row per job: current label, median, p90, proposed size
+   and the reason. Put the sizes in the migration diff only after approval.
+5. After a week on preloop, compare durations. If a size step cut the job's
+   time by less than a third, step back down: cost is size × time.
+
 ## Command reference (`preloop ci`)
 
 ```text
