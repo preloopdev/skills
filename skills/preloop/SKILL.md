@@ -94,8 +94,15 @@ VM for `preloop ci shell`.
 
 ## Move a repository from GitHub Actions
 
-Run `preloop ci migrate guide` and follow it exactly. Stop at every human gate
-it names; never push, disable a workflow, or touch a secret without approval.
+Run `preloop ci migrate guide` and follow it exactly. `preloop ci migrate apply`
+is one end-to-end migration with three phases: workflows (copy into
+`.preloop/workflows/` and open the pull request), secrets (the GitHub OIDC
+import after gate `set_secret`), and OIDC (per-provider trust check with the
+per-organization issuer and exact snippet, after gate `configure_trust`).
+`plan --json` and `verify --json` report all three phases; `--skip-secrets` /
+`--skip-oidc` leave one for later. Stop at every human gate it names; never
+push, disable a workflow, import a secret, or add a cloud trust without
+approval.
 
 ### Right-size each job first
 
@@ -149,6 +156,10 @@ preloop ci secrets set NAME [--stdin|--from-file F|--from-env V]
                       [--branch G] [--workflow P] [--job K] ...   # bindings
 preloop ci secrets scope NAME ...                   # replace bindings only
 preloop ci secrets delete NAME
+preloop ci secrets import [--repo o/r] [--secrets NAME...] [--scope repo|env|org]
+                          [--push]                  # value-free GitHub OIDC import
+preloop ci migrate plan|apply|verify [--skip-secrets] [--skip-oidc] [--json]
+preloop ci migrate guide                            # full agent playbook
 ```
 
 ## Consume the event stream
