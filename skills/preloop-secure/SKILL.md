@@ -1,13 +1,14 @@
 ---
 name: preloop-secure
-description: 'Audit and harden GitHub Actions CI security on preloop — dangerous triggers and pwn requests, script/template injection, secret scoping and bindings, artifact and cache poisoning, action pinning and actions.lock, OIDC trust, workflow-command abuse, runner hijack. Use when the user asks to secure CI, review workflow security, fix zizmor findings, lock down secrets, set fork or deny policies, or harden a preloop deployment. Triggers: "secure my CI", "audit workflows", "zizmor findings", "pull_request_target", "secret bindings", "actions.lock", "cache poisoning", "harden preloop".'
+description: 'Audit and harden GitHub Actions CI security on preloop — dangerous triggers and pwn requests, script/template injection, secret scoping and bindings, artifact and cache poisoning, action pinning and actions.lock, OIDC trust, workflow-command abuse, runner hijack. Use when the user asks to secure CI, review workflow security, fix zizmor findings, lock down secrets, set fork or deny policies, or harden a preloop organization. Triggers: "secure my CI", "audit workflows", "zizmor findings", "pull_request_target", "secret bindings", "actions.lock", "cache poisoning", "harden preloop".'
 ---
 
 # preloop-secure
 
 Audit a repository's GitHub Actions posture against the known CI/CD attack
 classes, map every finding to the preloop control that closes it, and apply the
-fix — workflow edits, secret bindings, engine policy — then verify on a real run.
+fix — workflow edits, secret bindings, organization policy — then verify on a real
+run.
 
 Attack surface reference: the GitHub Actions cheat sheet
 (`0xn3va.gitbook.io/cheat-sheets/ci-cd/github/actions`) and the zizmor audit
@@ -16,8 +17,9 @@ taxonomy (`docs.zizmor.sh/audits`). Every rule below maps to one of those two.
 ## Non-negotiables
 
 - **Never gate on a control that is not enabled.** `execution_protection` ships
-  in `evaluate` (log-only); `token_permissions_ceiling` is inactive unless its
-  table is present. Read `security-controls.md` / `SECURITY_MODEL.md` before
+  in `evaluate` (log-only); `token_permissions_ceiling` is inactive unless it
+  has been configured. Read the effective policy from the API (see
+  [Organization policy](#organization-policy-check-dont-assume)) before
   claiming a control covers a finding; if it is opt-in, enabling it is part of
   the fix, not an assumption.
 - **`pull_request` does not require approval for all outside collaborators by
@@ -31,7 +33,7 @@ taxonomy (`docs.zizmor.sh/audits`). Every rule below maps to one of those two.
   bypassable — the attacker pushes after the gate.
 - **Fork pull requests must never write shared state.** On preloop this means
   no stored secrets, no OIDC token, cache read-only — do not weaken it.
-- **A masked value is only masked if the engine knows it.** Secrets fetched at
+- **A masked value is only masked if the platform knows it.** Secrets fetched at
   runtime need `::add-mask::` before they touch the log; preloop masking covers
   raw, base64, hex and percent-encoded forms, but nothing it was never told.
 - **Report evidence, not vibes.** For every finding: the file, the line, the
@@ -71,8 +73,8 @@ makes every downstream injection reachable).
   `route:` = request injection. Pass values via `env`/inputs, read them inside
   the script.
 - `stop-commands`/`add-mask` injection: an attacker who controls logged text can
-  stop command processing. On preloop, `::add-path::`/`::set-env::` are gated
-  (pentest PR 913) — do not enable `ACTIONS_ALLOW_UNSECURE_COMMANDS`.
+  stop command processing. On preloop, `::add-path::`/`::set-env::` are gated —
+  do not enable `ACTIONS_ALLOW_UNSECURE_COMMANDS`.
 - Deprecated commands: `set-env`, `add-path`, `set-output`, `save-state` — the
   env-file equivalents (`$GITHUB_ENV`, `$GITHUB_OUTPUT`) are the safe path.
 
@@ -87,7 +89,7 @@ makes every downstream injection reachable).
   caller chain:
 
   ```sh
-  preloop ci secrets scope DEPLOY_KEY --repo org/repo \
+  plp ci secrets scope DEPLOY_KEY --repo org/repo \
     --branch 'refs/heads/main' --workflow deploy.yml --job deploy
   ```
 
@@ -103,8 +105,8 @@ makes every downstream injection reachable).
 
 - Pin every `uses:` to a commit SHA (`@sha`, 40 hex). Tags are mutable.
 - Enforce with `.github/workflows/actions.lock` — on preloop the lock records
-  the resolved SHAs and a workflow whose actions drift from it loses its OIDC
-  token. PR 1030 (`fix/require-lockfiles`) tightens this to a hard requirement.
+  the resolved SHAs, and a workflow whose actions drift from it loses its
+  OIDC token.
 - Typosquatting/unclaimed namespaces, composite actions running arbitrary
   shell, JavaScript actions with attacker-reachable inputs, Docker actions
   pulling mutable images — each is a distinct finding class (zizmor:
@@ -140,7 +142,7 @@ makes every downstream injection reachable).
 
 - Default `permissions:` should be `permissions: {}` or `contents: read` at the
   top level; grant write only per-job where needed.
-- `token_permissions_ceiling` (control-plane policy) caps what any workflow
+- `token_permissions_ceiling` (organization policy) caps what any workflow
   can request — `GET /api/v1/policies/token-ceiling` to read the effective
   ceiling. Not configured = no cap; the workflow's YAML is all that binds it.
 - `pull-requests: write` + `issues: write` + `contents: write` on a job that
@@ -157,12 +159,12 @@ makes every downstream injection reachable).
 - preloop's managed pool is the mitigation story: one job per microVM,
   destroyed at end, claimed warm from a paused pool — no shared daemon, no
   residue. Recommend managed runners for anything handling secrets; keep
-  self-hosted pools for low-trust, secret-free work.
+  GitHub self-hosted runners for low-trust, secret-free work.
 
-## Engine-side policy (check, don't assume)
+## Organization policy (check, don't assume)
 
-`execution_protection` and `token_permissions_ceiling` live on the control
-plane, not in your repo. Read them with the API:
+`execution_protection` and `token_permissions_ceiling` live on the preloop
+organization, not in your repo. Read them with the API:
 
 ```text
 GET /api/v1/policies/execution-protection   # mode + deny rules
@@ -185,16 +187,16 @@ One finding per row, ordered by reachability × impact:
 | # | Severity | File:line | Attack class | Why it is exploitable | Fix applied |
 |---|----------|-----------|--------------|-----------------------|-------------|
 
-Then a posture delta: which engine controls the audit enabled (`enforce`,
+Then a posture delta: which organization controls the audit enabled (`enforce`,
 ceiling, bindings, approval), and what remains open with the reason.
 
 ## Verify
 
 - A fix is verified when a real run exercises it: submit the workflow
-  (`preloop ci run`) and confirm the hardened path behaves —
+  (`plp ci run`) and confirm the hardened path behaves —
   a denied event is skipped and logged, a bound secret does not reach an
   unbound job, a drifted action loses its OIDC token.
-- `preloop ci secrets list` to confirm bindings landed; the audit log records
+- `plp ci secrets list` to confirm bindings landed; the audit log records
   the secret-release decision per job.
 - Re-run `zizmor`/`actionlint` after edits; do not report a finding as fixed
   from the diff alone.

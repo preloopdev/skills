@@ -1,27 +1,24 @@
 ---
 name: preloop
-description: 'Run and debug GitHub Actions workflows on the hosted preloop platform — jobs execute in isolated microVMs with per-second billing. Use when the user asks to sign in, run or plan a workflow, submit CI, debug a failed job, retry a failed step in its live VM, open a shell in a preserved VM, delegate a scoped credential to an agent, manage secrets, or work with the preloop CLI. Triggers: "preloop ci", "run this workflow", "CI failed", "debug the failure", "retry the step", "agent loop", "preloop login".'
+description: 'Run and debug GitHub Actions workflows on preloop — jobs execute in isolated microVMs with per-second billing. Use when the user asks to sign in, run or plan a workflow, submit CI, debug a failed job, retry a failed step in its live VM, delegate a scoped credential to an agent, manage secrets, or work with the `plp` CLI. Triggers: "plp ci", "run this workflow", "CI failed", "debug the failure", "retry the step", "agent loop", "plp login".'
 ---
 
 # Preloop
 
 Preloop is GitHub Actions-compatible CI where every job runs in an isolated
-microVM, billed per second. The control plane is **hosted** — the agent talks
-to `PRELOOP_URL` over a bearer token and never administers an engine. The same
-CLI can also self-host (`preloop serve`), but the default path is the hosted
-platform.
+microVM, billed per second. It is hosted at `https://app.preloop.dev`: the `plp` CLI
+signs in, submits runs and reads results over `PRELOOP_URL` with a bearer
+token.
 
-Source of truth for this skill: the CLI at `crates/preloop-cli/src/main.rs`
-(current subcommands only — verify a command exists before using it) and
-`docs/control-plane/`.
+Source of truth for this skill: `plp --help` and `plp ci --help`.
 
 ## Non-negotiables
 
-- **Hosted session, not a local engine.** `preloop login` (RFC 8628 device
-  flow) + `preloop org use <ORG>`. Do not ask the agent to handle the GitHub
-  credential or a user session; there is no engine administrator credential
-  on hosted preloop.
-- **Delegated tokens are short and narrow.** `preloop agent exec` yields a
+- **Hosted session.** `plp login` (RFC 8628 device flow) then
+  `plp whoami`; `plp org use <ORG>` pins the organization. Do not ask
+  for a GitHub password or PAT — GitHub access is granted once in the
+  dashboard, not per machine.
+- **Delegated tokens are short and narrow.** `plp agent exec` yields a
   session whose permissions are the intersection of the user's grants, the
   agent's ceiling, and requested scopes; max TTL 15 minutes. Never mint or
   pass a broader credential than needed.
@@ -30,53 +27,67 @@ Source of truth for this skill: the CLI at `crates/preloop-cli/src/main.rs`
   use secrets, use OIDC, publish runs, approve environments or forks, or
   administer agents. A refusal for out-of-scope action is expected; do not
   retry it with a broader credential.
-- **Push-back is human-owned.** Agents do not use `preloop ci push` or the
+- **Push-back is human-owned.** Agents do not use `plp ci push` or the
   auto-PR path. A run is evidence for the person; the person publishes.
 - **Dirty retry is not a clean verdict.** A fix proven inside a paused VM
   must be confirmed by a clean run from a fresh VM before calling the job
   fixed.
-- **Secrets are reference-based.** `preloop ci secrets list` returns names,
+- **Secrets are reference-based.** `plp ci secrets list` returns names,
   tiers and bindings — never values.
 
 ## Sign in
 
 ```sh
-preloop login --platform-url https://<hosted-control-plane>
-preloop whoami
-preloop org use org_01H...
-preloop doctor        # verify credential/config
+plp login           # device flow; opens https://app.preloop.dev
+plp whoami          # principal, org and token expiry
+plp org use org_01H...
 ```
 
+`plp login` targets `https://app.preloop.dev`; `--platform-url <URL>`
+(or `PRELOOP_URL` in the environment) points it at another origin.
+
 Scripts and agents use `PRELOOP_URL` + `PRELOOP_TOKEN` instead of a session.
+
+## Connect a repository
+
+GitHub access is granted in the web app, once per account: the Connect step at
+`https://app.preloop.dev/onboarding/connect` installs the preloop GitHub App on
+the repositories you pick, with Contents read (checkout and workflow files),
+Checks write (pass/fail on the pull request) and Actions read (which workflows
+still run on GitHub). A repository that does not appear in `plp ci` is a
+repository the App is not installed on — install it there.
+
+Publishing a run (`plp ci push`) and migrating (`plp ci migrate apply`)
+use the developer's own `git` and `gh` on their machine; the App is what lets
+preloop read and report on the repository.
 
 ## Agent credentials (human sets up)
 
 ```sh
-preloop agent create ci-bot --roles ci-agent
-preloop agent credentials ci-bot
-preloop agent login --agent ci-bot --oidc-token "$OIDC_ID_TOKEN"   # or --cid/--assertion (Ed25519, single-use)
-preloop agent exec --agent ci-bot --scopes runs:read,artifacts:read --ttl 15m -- <command>
-preloop agent grant-job RUN_ID/JOB --agent ci-bot                  # task grant on one live job
+plp agent create ci-bot --roles ci-agent
+plp agent credentials ci-bot
+plp agent login --agent ci-bot --oidc-token "$OIDC_ID_TOKEN"   # or --cid/--assertion (Ed25519, single-use)
+plp agent exec --agent ci-bot --scopes runs:read,artifacts:read --ttl 15m -- <command>
+plp agent grant-job RUN_ID/JOB --agent ci-bot                  # task grant on one live job
 ```
 
 ## Core loop
 
 ```text
-preloop ci plan -f <workflow> --json   # expanded job DAG + matrix, no execution
-preloop ci run -f <workflow>           # snapshot working tree, run; TTY runs pause on failure
-preloop ci status --json               # active/recent runs
-preloop ci logs RUN_ID --job <job> [--step N] [-f]
-preloop ci debug --json RUN_ID         # paused session as JSON (agents/scripts)
+plp ci plan -f <workflow> --json   # expanded job DAG + matrix, no execution
+plp ci run -f <workflow>           # snapshot working tree, run; TTY runs pause on failure
+plp ci status --json               # active/recent runs
+plp ci logs RUN_ID --job <job> [--step N] [-f]
+plp ci debug --json RUN_ID         # paused session as JSON (agents/scripts)
 <edit source on the host>
-preloop ci debug RUN_ID --verdict retry --sync --from <step>
-preloop ci debug RUN_ID --verdict continue|abort
-preloop ci rerun RUN_ID --failed       # replays captured tree — for flakes, not source fixes
+plp ci debug RUN_ID --verdict retry --sync --from <step>
+plp ci debug RUN_ID --verdict continue|abort
+plp ci rerun RUN_ID --failed       # replays captured tree — for flakes, not source fixes
 ```
 
-Interactive `preloop ci run` **pauses** at a failed step and holds the VM.
+Interactive `plp ci run` **pauses** at a failed step and holds the VM.
 Non-interactive runs (`--detach`, piped stdout, agents) never pause; pass
-`--debug` to opt into a debug session, or `--preserve-on-failure` to keep the
-VM for `preloop ci shell`.
+`--debug` to opt into a debug session.
 
 ### Running checks before a push
 
@@ -89,12 +100,12 @@ VM for `preloop ci shell`.
 - `pull_request` events need `--base <ref>` for `branches:`/`paths:` filters
   and `--payload <file>` when conditions read PR fields — otherwise skipped
   steps can fake green.
-- `preloop ci rerun --failed` replays the *captured* tree — good for flakes,
+- `plp ci rerun --failed` replays the *captured* tree — good for flakes,
   useless for testing a source fix. A fix needs a fresh `run`.
 
 ## Move a repository from GitHub Actions
 
-Run `preloop ci migrate guide` and follow it exactly. `preloop ci migrate apply`
+Run `plp ci migrate guide` and follow it exactly. `plp ci migrate apply`
 is one end-to-end migration with three phases: workflows (copy into
 `.preloop/workflows/` and open the pull request), secrets (the GitHub OIDC
 import after gate `set_secret`), and OIDC (per-provider trust check with the
@@ -128,38 +139,38 @@ Pick a runner size per job from its GitHub Actions history, not by guessing.
 5. After a week on preloop, compare durations. If a size step cut the job's
    time by less than a third, step back down: cost is size × time.
 
-## Command reference (`preloop ci`)
+## Command reference (`plp ci`)
 
 ```text
-preloop ci run [-f WF] [--job ID] [--event T] [--payload F] [--base REF]
-               [--secret NAME=V] [-d|--detach] [--debug] [--preserve-on-failure]
-preloop ci plan [-f WF] [--json]
-preloop ci status [RUN_ID] [--json]
-preloop ci logs [RUN_ID] [--job J] [--step N] [-f]
-preloop ci cancel [RUN_ID]
-preloop ci rerun [RUN_ID] [--failed | --job J]
-preloop ci push RUN_ID                 # human path: push + PR + check runs
-preloop ci manifest RUN_ID [--job J] [--verify] [--dsse --export F]
-preloop ci debug [RUN_ID] [--json] [--verdict retry|continue|abort] [--sync]
+plp ci run [-f WF] [--job ID] [--event T] [--payload F] [--base REF]
+               [--secret NAME=V] [-d|--detach] [--debug]
+plp ci plan [-f WF] [--json]
+plp ci status [RUN_ID] [--json]
+plp ci logs [RUN_ID] [--job J] [--step N] [-f]
+plp ci cancel [RUN_ID]
+plp ci rerun [RUN_ID] [--failed | --job J]
+plp ci push RUN_ID                 # human path: push + PR + check runs
+plp ci manifest RUN_ID [--job J] [--verify] [--dsse --export F]
+plp ci debug [RUN_ID] [--json] [--verdict retry|continue|abort] [--sync]
                [--from STEP | --from-start] [--revert none|untracked|all]
                [--export] [--takeover]
-preloop ci shell [last-failed]         # PTY into a preserved VM
-preloop ci dap RUN_ID                  # DAP debug adapter session
+plp ci dap RUN_ID                  # DAP debug adapter session
 ```
 
 Secrets:
 
 ```text
-preloop ci secrets list [--repo o/r | --org O]      # names/tier/bindings, never values
-preloop ci secrets set NAME [--stdin|--from-file F|--from-env V]
+plp ci secrets list [--repo o/r | --org O]      # names/tier/bindings, never values
+plp ci secrets get NAME [--repo o/r | --org O]  # tier and bindings, never values
+plp ci secrets set NAME [--stdin|--from-file F|--from-env V]
                       [--repo o/r [--env E] | --org O]
                       [--branch G] [--workflow P] [--job K] ...   # bindings
-preloop ci secrets scope NAME ...                   # replace bindings only
-preloop ci secrets delete NAME
-preloop ci secrets import [--repo o/r] [--secrets NAME...] [--scope repo|env|org]
+plp ci secrets scope NAME ...                   # replace bindings only
+plp ci secrets delete NAME
+plp ci secrets import [--repo o/r] [--secrets NAME...] [--scope repo|env|org]
                           [--push]                  # value-free GitHub OIDC import
-preloop ci migrate plan|apply|verify [--skip-secrets] [--skip-oidc] [--json]
-preloop ci migrate guide                            # full agent playbook
+plp ci migrate plan|apply|verify [--skip-secrets] [--skip-oidc] [--json]
+plp ci migrate guide                            # full agent playbook
 ```
 
 ## Consume the event stream
@@ -168,7 +179,7 @@ preloop ci migrate guide                            # full agent playbook
 snapshot then live NDJSON: `run_accepted`, `run_status`, `job_status`, `log`,
 `annotation`, `job_completed`, `check_run_created`. Reconnect + de-duplicate
 — a new connection starts from a fresh snapshot. Point-in-time:
-`preloop ci status RUN_ID --json` or `GET /api/v1/runs/RUN_ID`.
+`plp ci status RUN_ID --json` or `GET /api/v1/runs/RUN_ID`.
 
 ## Debug sessions over HTTP
 
@@ -177,7 +188,7 @@ One mutating lease at a time; operations carry `request_id` +
 `expected_version` (idempotent, stale versions rejected). `retry_from` takes
 a zero-based `step_index`. Pause credit is capped at 20 minutes per job —
 release the lease when done so unattached time doesn't bill as pause.
-`preloop ci debug --takeover` replaces a stranded lease.
+`plp ci debug --takeover` replaces a stranded lease.
 
 ## Failure classification
 
@@ -196,12 +207,9 @@ release the lease when done so unattached time doesn't bill as pause.
 
 | Variable | Meaning |
 |---|---|
-| `PRELOOP_URL` | control-plane base URL (hosted default; `http://127.0.0.1:9090` for a local engine) |
+| `PRELOOP_URL` | platform base URL; defaults to `https://app.preloop.dev` |
 | `PRELOOP_TOKEN` | bearer for API calls (session token or delegated agent token) |
-| `PRELOOP_HOME` | state dir; default `~/.preloop` |
-
-Local/self-host knobs (`PRELOOP_RUNNER_*`, `serve`) apply only when running
-your own engine — not part of the hosted agent path.
+| `PRELOOP_HOME` | CLI state directory (session cache); default `~/.preloop` |
 
 ## Verification rule
 
