@@ -8,7 +8,7 @@ description: 'Measure and reduce CI cost on preloop — path filters and concurr
 Make a workflow do less work — then prove it on the next run. Optimization on
 preloop is not changing the YAML and hoping; it is reading what a run actually
 cost (per job, per step, per test, per cache restore) and removing the work
-whose outcome cannot change, with the engine's own accounting as the check.
+whose outcome cannot change, with the platform's own accounting as the check.
 
 ## Non-negotiables
 
@@ -21,7 +21,7 @@ whose outcome cannot change, with the engine's own accounting as the check.
   input set. Never narrow a safety rule to inflate the savings number.
 - **Do not double-cache.** Tools that already do incrementality (Gradle,
   Cargo, Bazel, sccache-covered toolchains) are *refused* by the reuse
-  engine with an `external_effect`/`unproven_determinism` barrier — that is
+  layer with an `external_effect`/`unproven_determinism` barrier — that is
   the right answer, not a miss. The win there is keeping the tool's own
   cache warm, not wrapping the step in another cache. Fixing this is
   regression, not optimization.
@@ -55,11 +55,11 @@ whose outcome cannot change, with the engine's own accounting as the check.
 
 Establish the baseline from the run record, not from anecdotes.
 
-- `preloop ci status --json` / `GET /api/v1/runs/{run_id}` — per-run
+- `plp ci status --json` / `GET /api/v1/runs/{run_id}` — per-run
   wall time and job conclusions.
 - `GET /api/v1/runs/{run_id}/events` (or `events.ndjson`) — per-job and
   per-step start/finish; compute job and step durations.
-- `preloop ci logs --job <job> --step <n>` — where the seconds went inside
+- `plp ci logs --job <job> --step <n>` — where the seconds went inside
   the slowest steps (restore, install, build, test).
 - `GET /api/v1/runs/{run_id}/manifest` and
   `.../jobs/{job_id}/manifest` (+ `manifest-facts`) — the signed record of
@@ -71,7 +71,7 @@ Establish the baseline from the run record, not from anecdotes.
 - `GET /api/v1/scheduler/history` — queue wait vs. execution time; a job
   that waits 90 s for a warm slot and runs 10 s has a scheduling problem,
   not a compute problem.
-- `preloop ci plan` (dry-run of a workflow submission) — the expanded job
+- `plp ci plan` (dry-run of a workflow submission) — the expanded job
   DAG and matrix before paying for a run.
 
 Report the baseline as a table: job | wall_s | queue_s | top step | step_s |
@@ -155,10 +155,9 @@ skip the ones the change cannot reach.
   (`__pycache__`, `.pytest_cache`) is the template. Everything else —
   daemons, sockets, nondeterminism — stays executed; that is correct.
 - Process-level reuse (skip a `pytest` invocation inside a step) is the
-  documented next lever — the eBPF observer already records per-pid exec
-  trees with inputs and cpu. Simulation puts ~99 % of re-executed step
-  compute as skippable under perfect partitioning; treat that as a ceiling
-  estimate, not a feature you can call today.
+  documented next lever; treat the ~99 % of re-executed step compute it
+  projects as skippable as a ceiling estimate, not a feature you can call
+  today.
 
 ## Step 6 — Structure the DAG and the matrix
 
