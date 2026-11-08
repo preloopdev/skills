@@ -52,10 +52,10 @@ Scripts and agents use `PRELOOP_URL` + `PRELOOP_TOKEN` instead of a session.
 
 GitHub access is granted in the web app, once per account: the Connect step at
 `https://app.preloop.dev/onboarding/connect` installs the preloop GitHub App on
-the repositories you pick, with Contents read (checkout and workflow files),
-Checks write (pass/fail on the pull request) and Actions read (which workflows
-still run on GitHub). A repository that does not appear in `plp ci` is a
-repository the App is not installed on — install it there.
+the repositories you pick. It asks for `contents`, `pull_requests` and `checks`
+write — migration branches and pull requests, and pass/fail on the commit — plus
+`actions`, `issues` and `metadata` read. A repository that does not appear in
+`plp ci` is a repository the App is not installed on — install it there.
 
 Publishing a run (`plp ci push`) and migrating (`plp ci migrate apply`)
 use the developer's own `git` and `gh` on their machine; the App is what lets
