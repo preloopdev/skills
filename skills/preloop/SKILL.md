@@ -7,8 +7,8 @@ description: 'Run and debug GitHub Actions workflows on preloop — jobs execute
 
 Preloop is GitHub Actions-compatible CI where every job runs in an isolated
 microVM, billed per second. It is hosted at `https://app.preloop.dev`: the `plp` CLI
-signs in, submits runs and reads results over `PRELOOP_URL` with a bearer
-token.
+signs in, submits runs and reads results at the origin compiled into the
+binary, with a bearer token.
 
 Source of truth for this skill: `plp --help` and `plp ci --help`.
 
@@ -43,10 +43,10 @@ plp whoami          # principal, org and token expiry
 plp org use org_01H...
 ```
 
-`plp login` targets `https://app.preloop.dev`; `--platform-url <URL>`
-(or `PRELOOP_URL` in the environment) points it at another origin.
+`plp login` signs in at `https://app.preloop.dev`, the origin compiled into the
+binary; there is no runtime flag or environment variable that changes it.
 
-Scripts and agents use `PRELOOP_URL` + `PRELOOP_TOKEN` instead of a session.
+Scripts and agents use `PRELOOP_TOKEN` instead of a session.
 
 ## Connect a repository
 
@@ -207,7 +207,6 @@ release the lease when done so unattached time doesn't bill as pause.
 
 | Variable | Meaning |
 |---|---|
-| `PRELOOP_URL` | platform base URL; defaults to `https://app.preloop.dev` |
 | `PRELOOP_TOKEN` | bearer for API calls (session token or delegated agent token) |
 | `PRELOOP_HOME` | CLI state directory (session cache); default `~/.preloop` |
 
