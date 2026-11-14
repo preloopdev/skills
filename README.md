@@ -44,5 +44,4 @@ platform. Verify a command with `plp --help` before using it.
 ## Links
 
 - [Preloop](https://app.preloop.dev)
-- [Documentation](https://docs.preloop.dev)
 - [Agent Skills specification](https://agentskills.io)
