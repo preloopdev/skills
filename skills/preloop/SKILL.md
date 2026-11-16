@@ -80,8 +80,8 @@ plp ci status --json               # active/recent runs
 plp ci logs RUN_ID --job <job> [--step N] [-f]
 plp ci debug --json RUN_ID         # paused session as JSON (agents/scripts)
 <edit source on the host>
-plp ci debug RUN_ID --verdict retry --sync --from <step>
-plp ci debug RUN_ID --verdict continue|abort
+plp ci debug RUN_ID retry --from <step> --sync
+plp ci debug RUN_ID continue        # or: abort
 plp ci rerun RUN_ID --failed       # replays captured tree — for flakes, not source fixes
 ```
 
@@ -151,9 +151,15 @@ plp ci cancel [RUN_ID]
 plp ci rerun [RUN_ID] [--failed | --job J]
 plp ci push RUN_ID                 # human path: push + PR + check runs
 plp ci manifest RUN_ID [--job J] [--verify] [--dsse --export F]
-plp ci debug [RUN_ID] [--json] [--verdict retry|continue|abort] [--sync]
-               [--from STEP | --from-start] [--revert none|untracked|all]
-               [--export] [--takeover]
+plp ci debug [RUN_ID] [--json] [--takeover] [--line] [--job NAME]
+               # with no verb: line-mode attachment to the paused job
+plp ci debug [RUN_ID] status | context [--path P] | eval EXPR
+plp ci debug [RUN_ID] exec -- CMD...      # argv, no local shell
+plp ci debug [RUN_ID] set env K=V         # or: set output K=V
+plp ci debug [RUN_ID] sync                # upload local uncommitted changes
+plp ci debug [RUN_ID] retry [--from N | --from-start]
+                      [--revert none|untracked|all] [--sync]
+plp ci debug [RUN_ID] step | continue | abort
 plp ci dap RUN_ID                  # DAP debug adapter session
 ```
 
